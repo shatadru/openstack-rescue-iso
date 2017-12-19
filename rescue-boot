@@ -1,0 +1,93 @@
+#!/bin/bash
+# This script can be used to rescue a nova instance using iso file.
+# Usage : rescue-boot <instance's domain name> <iso/file/path>
+#         rescue-boot -r <instance's domain name> <backed up xml's path>
+#
+# -r / --revert : Revert changes
+#
+# Steps :
+# Check the domain
+# Backup xml
+# Edit xml
+#   set boot device
+#   add iso
+# Ask to do nova reboot 
+# In case of any issue use "nova reboot --hard <UUID>" to re-generate the instance's xml defination.
+
+# Command line arg handling #
+
+args=( "$@" )
+numarg=$#
+argnum=$((numarg-1))
+
+for i in `seq 0 "$argnum"`
+	do
+	key=${args[$i]}
+	case $key in
+    		-r|--revert)
+    			revert="1"
+		;;
+    		-h|--help)
+
+			help="1"
+		;;
+		-v|--verbose)
+
+			verbose="1"
+		;;
+    
+ 		*)
+    		;;
+	esac
+done
+
+if [ "$help" == "1" ];then
+help_show;
+elif [ "$revert" == "1" ];then
+instance_name=$2
+rescue_file_path=$3
+revert_rescue $instance_name $rescue_file_path
+else
+instance_name=$1
+file_path=$2
+rescue_config $instance_name $file_path
+fi
+
+function help_show() {
+echo "# This script can be used to rescue a nova instance using iso file.
+# Usage : rescue-boot <instance's domain name> <iso/file/path>
+#         rescue-boot -r <instance's domain name>
+#
+# -r / --revert : Revert changes
+# -h / --help   : Show help
+#
+# In case of any issue use \"nova reboot --hard <UUID>\" to re-generate the instance's xml defination.
+exit
+}
+
+function revert_rescue (){
+echo "Reverting xml defination...."
+instance_name=$1
+rescue_file_path=$2
+# TODO: Add sanity check if instance name matches the same from xml def
+
+virsh defile $rescue_file_path
+exit
+}
+
+
+function rescue_config (){ 
+instance_name=$1
+file_path=$2
+echo "Adding iso $file_path to the instance $instance_name..."
+bkup_fname=$instance_name-backup-`date +%d%m%y_%H%M%S`.xml
+virsh dumpxml $instance_name > /tmp/$bkup_fname
+echo "Backed up xml : /tmp/$bkup_fname"
+virsh attach-disk $instance_name $file_path hdc --type cdrom --mode readonly
+# consideration: change-media guest01 hdb /pool/disc.iso
+# tricky part set boot order
+# Once done ask to restart node
+echo "Restore the xml once done rescuing the instance"
+echo "rescue-boot -r $instance_name /tmp/$bkup_fname
+exit
+}
