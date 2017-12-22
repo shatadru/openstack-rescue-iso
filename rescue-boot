@@ -14,6 +14,59 @@
 # Ask to do nova reboot 
 # In case of any issue use "nova reboot --hard <UUID>" to re-generate the instance's xml defination.
 
+# Function definations
+
+
+function help_show() {
+    echo "# This script can be used to rescue a nova instance using iso file.
+    # Usage : rescue-boot <instance's domain name> <iso/file/path>
+    #         rescue-boot -r <instance's domain name>
+    #
+    # -r / --revert : Revert changes
+    # -h / --help   : Show help
+    #
+    # In case of any issue use \"nova reboot --hard <UUID>\" to re-generate the instance's xml defination."
+    exit
+}
+
+function revert_rescue (){
+    echo "Reverting xml defination...."
+    instance_name=$1
+    rescue_file_path=$2
+    # TODO: Add sanity check if instance name matches the same from xml def
+
+    virsh define $rescue_file_path
+    exit
+}
+
+
+function rescue_config (){ 
+    instance_name=$1
+    file_path=$2
+    echo "Adding iso $file_path to the instance $instance_name..."
+    bkup_fname=$instance_name-backup-`date +%d%m%y_%H%M%S`.xml
+    virsh dumpxml $instance_name > /tmp/$bkup_fname
+    echo "Backed up xml : /tmp/$bkup_fname"
+    ### EDIT XML
+    
+    ## ATTACH DISK
+    uuid=$(cat /tmp/$bkup_fname|grep -i '</uuid>'|cut -f2 -d ">"|cut -f1 -d "<")
+    cp $file_path /var/lib/nova/instances/$uuid/
+    restorecon -vvFR /var/lib/nova/instances/$uuid/
+    virsh attach-disk $instance_name /var/lib/nova/instances/$uuid/$fname hdc --type cdrom --mode readonly
+    ## REBOOT
+    virsh send-key $instance_name KEY_LEFTCTRL KEY_LEFTALT KEY_DELETE
+    
+    virsh attach-disk $instance_name $file_path hdc --type cdrom --mode readonly
+    # consideration: change-media guest01 hdb /pool/disc.iso
+    # tricky part set boot order
+    # Once done ask to restart node
+    echo "Restore the xml once done rescuing the instance"
+    echo "rescue-boot -r $instance_name /tmp/$bkup_fname"
+    exit
+}
+
+
 # Command line arg handling #
 
 args=( "$@" )
@@ -42,52 +95,14 @@ for i in `seq 0 "$argnum"`
 done
 
 if [ "$help" == "1" ];then
-help_show;
+    help_show;
 elif [ "$revert" == "1" ];then
-instance_name=$2
-rescue_file_path=$3
-revert_rescue $instance_name $rescue_file_path
+    instance_name=$2
+    rescue_file_path=$3
+    revert_rescue $instance_name $rescue_file_path
 else
-instance_name=$1
-file_path=$2
-rescue_config $instance_name $file_path
+    instance_name=$1
+    file_path=$2
+    rescue_config $instance_name $file_path
 fi
 
-function help_show() {
-echo "# This script can be used to rescue a nova instance using iso file.
-# Usage : rescue-boot <instance's domain name> <iso/file/path>
-#         rescue-boot -r <instance's domain name>
-#
-# -r / --revert : Revert changes
-# -h / --help   : Show help
-#
-# In case of any issue use \"nova reboot --hard <UUID>\" to re-generate the instance's xml defination.
-exit
-}
-
-function revert_rescue (){
-echo "Reverting xml defination...."
-instance_name=$1
-rescue_file_path=$2
-# TODO: Add sanity check if instance name matches the same from xml def
-
-virsh defile $rescue_file_path
-exit
-}
-
-
-function rescue_config (){ 
-instance_name=$1
-file_path=$2
-echo "Adding iso $file_path to the instance $instance_name..."
-bkup_fname=$instance_name-backup-`date +%d%m%y_%H%M%S`.xml
-virsh dumpxml $instance_name > /tmp/$bkup_fname
-echo "Backed up xml : /tmp/$bkup_fname"
-virsh attach-disk $instance_name $file_path hdc --type cdrom --mode readonly
-# consideration: change-media guest01 hdb /pool/disc.iso
-# tricky part set boot order
-# Once done ask to restart node
-echo "Restore the xml once done rescuing the instance"
-echo "rescue-boot -r $instance_name /tmp/$bkup_fname
-exit
-}
